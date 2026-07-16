@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trust System - Dashboard Workspace</title>
+    <style>
+        :root {
+            --bg: #030408;
+            --panel: rgba(10, 11, 18, 0.76);
+            --panel-soft: rgba(16, 18, 27, 0.88);
+            --panel-deep: #080a0f;
+            --line: rgba(255, 255, 255, 0.08);
+            --line-strong: rgba(95, 85, 250, 0.26);
+            --accent: #8b8cff;
+            --accent-strong: #45f3ff;
+            --accent-blue: #6366f1;
+            --success: #10b981;
+            --text: #f8fafc;
+            --muted: #8b98b3;
+            --danger: #ef4444;
+            --shadow: 0 30px 100px rgba(0, 0, 0, 0.8);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            min-height: 100%;
+            background:
+                radial-gradient(circle at 10% 20%, rgba(95, 85, 250, 0.12) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(14, 165, 233, 0.10) 0%, transparent 45%),
+                linear-gradient(180deg, #06070d 0%, var(--bg) 100%);
+            color: var(--text);
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+            background-size: 64px 64px;
+            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.22), transparent 88%);
+            opacity: 0.55;
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        button {
+            border: none;
+            cursor: pointer;
+        }
+
+        .app-root {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .wizard-stage {
+            width: min(620px, calc(100vw - 24px));
+            margin: 0 auto;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 12px 0;
+        }
+
+        .wizard-card {
+            width: 100%;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            box-shadow: var(--shadow);
+            border-radius: 24px;
+            padding: 28px;
+            backdrop-filter: blur(24px);
+            animation: lift 240ms ease-out;
+            max-height: calc(100vh - 24px);
+            overflow: auto;
+        }
+
+        @keyframes lift {
+            from {
+                opacity: 0;
+                transform: translateY(12px) scale(0.985);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            color: var(--accent);
+            background: rgba(95, 85, 250, 0.08);
+            font-size: 12px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            margin-bottom: 18px;
+        }
+
+        .wizard-title {
+            font-size: clamp(28px, 4.6vw, 42px);
+            line-height: 1.05;
+            letter-spacing: -0.04em;
+            margin-bottom: 12px;
+        }
+
+        .privacy-title {
+            font-size: clamp(24px, 3.8vw, 32px);
+        }
+
+        .wizard-subtitle {
+            max-width: 56ch;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.7;
+            margin-bottom: 20px;
+        }
+
+        .accent-button {
+            width: 100%;
+            border-radius: 14px;
+            padding: 14px 18px;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent));
+            color: #06111a;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            box-shadow: 0 0 0 1px rgba(69, 243, 255, 0.18), 0 16px 34px rgba(69, 243, 255, 0.24);
+            transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+        }
+
+        .accent-button:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 0 0 1px rgba(69, 243, 255, 0.30), 0 18px 40px rgba(69, 243, 255, 0.30);
+        }
+
+        .accent-button:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .mode-list {
+            display: grid;
+            gap: 14px;
+            margin: 16px 0 14px;
+        }
+
+        .mode-card {
+            text-align: left;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(16, 18, 27, 0.94), rgba(10, 12, 18, 0.94));
+            padding: 14px 14px 13px;
+            color: var(--text);
+            transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
+        }
+
+        .mode-card:hover {
+            transform: translateY(-1px);
+            border-color: rgba(69, 243, 255, 0.32);
+        }
+
+        .mode-card.selected {
+            border-color: rgba(69, 243, 255, 0.80);
+            background: linear-gradient(180deg, rgba(22, 24, 38, 0.98), rgba(10, 12, 18, 0.98));
+            box-shadow: 0 0 0 1px rgba(69, 243, 255, 0.18), 0 18px 36px rgba(0, 0, 0, 0.28);
+        }
+
+        .mode-card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+
+        .mode-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            border: 1px solid rgba(69, 243, 255, 0.22);
+            color: var(--accent);
+            background: rgba(69, 243, 255, 0.06);
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .mode-description {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.65;
+        }
+
+        .wizard-note {
+            min-height: 22px;
+            margin-top: 14px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .wizard-note.error {
+            color: #fca5a5;
+        }
+
+        .dashboard-shell {
+            width: 100%;
+            height: 100vh;
+            display: grid;
+            grid-template-columns: 88px minmax(0, 1fr) 320px;
+            gap: 0;
+            background:
+                radial-gradient(circle at 15% 15%, rgba(95, 85, 250, 0.08), transparent 36%),
+                radial-gradient(circle at 85% 85%, rgba(14, 165, 233, 0.08), transparent 40%),
+                rgba(5, 7, 11, 0.84);
+        }
+
+        .left-rail {
+            border-right: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(9, 10, 15, 0.98), rgba(6, 7, 11, 0.98));
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+            padding: 16px 0;
+        }
+
+        .rail-brand {
+            width: 50px;
+            height: 50px;
+            border-radius: 16px;
+            display: grid;
+            place-items: center;
+            background: radial-gradient(circle at 30% 30%, rgba(139, 140, 255, 0.30), rgba(99, 102, 241, 0.16));
+            border: 1px solid rgba(139, 140, 255, 0.22);
+            color: var(--accent);
+            font-weight: 900;
+            box-shadow: 0 0 24px rgba(139, 140, 255, 0.10);
+        }
+
+        .nav-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .nav-item {
+            width: 58px;
+            height: 58px;
+            border-radius: 18px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--muted);
+            display: grid;
+            place-items: center;
+            gap: 6px;
+            transition: border-color 140ms ease, background 140ms ease, color 140ms ease, transform 140ms ease;
+        }
+
+        .nav-item span {
+            display: block;
+            font-size: 10px;
+            line-height: 1.1;
+            text-align: center;
+            max-width: 44px;
+        }
+
+        .nav-item strong {
+            display: block;
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .nav-item:hover,
+        .nav-item.active {
+            color: var(--text);
+            background: rgba(139, 140, 255, 0.08);
+            border-color: rgba(139, 140, 255, 0.22);
+            transform: translateY(-1px);
+        }
+
+        .center-pane {
+            min-width: 0;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            background: linear-gradient(180deg, rgba(7, 8, 12, 0.92), rgba(5, 6, 9, 0.98));
+        }
+
+        .feed-strip {
+            border-bottom: 1px solid var(--line);
+            padding: 16px 18px;
+            display: grid;
+            gap: 12px;
+        }
+
+        .feed-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .section-label {
+            color: var(--muted);
+            font-size: 12px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
+        .section-label.spaced {
+            margin-bottom: 12px;
+        }
+
+        .mode-chip {
+            border: 1px solid rgba(69, 243, 255, 0.18);
+            background: rgba(69, 243, 255, 0.06);
+            color: var(--accent);
+            border-radius: 999px;
+            padding: 7px 11px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .feed-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+        }
+
+        .post-card {
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(14, 16, 23, 0.96), rgba(9, 11, 16, 0.96));
+            padding: 14px;
+        }
+
+        .post-card h4 {
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .post-card p {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.65;
+            margin-bottom: 12px;
+        }
+
+        .post-meta {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .comment-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .comment-input {
+            flex: 1;
+            min-width: 0;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.12);
+            background: rgba(4, 5, 8, 0.92);
+            color: var(--text);
+            padding: 11px 12px;
+            outline: none;
+            transition: border-color 140ms ease, opacity 140ms ease;
+        }
+
+        .comment-input:focus {
+            border-color: rgba(139, 140, 255, 0.42);
+        }
+
+        .comment-input:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            border-color: rgba(239, 68, 68, 0.24);
+            color: #fca5a5;
+        }
+
+        .comment-button {
+            flex: 0 0 auto;
+            border-radius: 12px;
+            padding: 11px 14px;
+            background: rgba(139, 140, 255, 0.12);
+            color: var(--accent);
+            border: 1px solid rgba(139, 140, 255, 0.18);
+            font-weight: 800;
+        }
+
+        .comment-button:disabled {
+            opacity: 0.38;
+            cursor: not-allowed;
+        }
+
+        .social-grid {
+            min-height: 0;
+            display: grid;
+            grid-template-columns: 290px minmax(0, 1fr);
+        }
+
+        .chat-heads {
+            border-right: 1px solid var(--line);
+            background: rgba(9, 10, 14, 0.98);
+            padding: 16px;
+            overflow: auto;
+        }
+
+        .chat-head {
+            display: grid;
+            grid-template-columns: 38px minmax(0, 1fr);
+            gap: 12px;
+            align-items: center;
+            padding: 12px;
+            border-radius: 16px;
+            border: 1px solid transparent;
+            transition: background 140ms ease, border-color 140ms ease;
+            cursor: pointer;
+        }
+
+        .chat-head:hover,
+        .chat-head.active {
+            background: rgba(139, 140, 255, 0.06);
+            border-color: rgba(139, 140, 255, 0.18);
+        }
+
+        .chat-head .avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: rgba(79, 140, 255, 0.10);
+            color: var(--accent);
+            border: 1px solid rgba(139, 140, 255, 0.18);
+            font-size: 12px;
+            font-weight: 900;
+        }
+
+        .chat-head .meta {
+            min-width: 0;
+        }
+
+        .chat-head .meta strong {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 4px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .chat-head .meta span {
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .handshake-pill {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            margin-top: 6px;
+            padding: 5px 8px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.10);
+            border: 1px solid rgba(16, 185, 129, 0.22);
+            color: #8ef0c8;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .handshake-pill.pending {
+            background: rgba(239, 68, 68, 0.08);
+            border-color: rgba(239, 68, 68, 0.22);
+            color: #fca5a5;
+        }
+
+        .chat-window {
+            min-width: 0;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto;
+            background: rgba(6, 7, 11, 0.98);
+        }
+
+        .chat-header {
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--line);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .chat-header h3 {
+            font-size: 15px;
+            margin-bottom: 3px;
+        }
+
+        .chat-header p {
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .chat-state {
+            text-align: right;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .chat-log {
+            min-height: 0;
+            overflow: auto;
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .message-bubble {
+            max-width: min(640px, 78%);
+            border-radius: 16px;
+            padding: 12px 13px;
+            line-height: 1.6;
+            font-size: 13px;
+            border: 1px solid transparent;
+        }
+
+        .message-bubble.inbound {
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(148, 163, 184, 0.10);
+            align-self: flex-start;
+        }
+
+        .message-bubble.outbound {
+            align-self: flex-end;
+            background: linear-gradient(135deg, rgba(79, 140, 255, 0.88), rgba(139, 140, 255, 0.74));
+            color: #04111a;
+        }
+
+        .composer {
+            padding: 14px 18px 18px;
+            border-top: 1px solid var(--line);
+            display: flex;
+            gap: 10px;
+            background: rgba(8, 9, 13, 0.98);
+        }
+
+        .composer input {
+            flex: 1;
+            min-width: 0;
+            border-radius: 14px;
+            border: 1px solid rgba(148, 163, 184, 0.14);
+            background: rgba(3, 4, 7, 0.96);
+            color: var(--text);
+            padding: 12px 14px;
+            outline: none;
+            transition: border-color 140ms ease, opacity 140ms ease;
+        }
+
+        .composer input:focus {
+            border-color: rgba(139, 140, 255, 0.42);
+        }
+
+        .composer input:disabled {
+            opacity: 0.42;
+            cursor: not-allowed;
+            border-color: rgba(239, 68, 68, 0.24);
+            color: #fca5a5;
+        }
+
+        .composer button {
+            min-width: 104px;
+            border-radius: 14px;
+            padding: 12px 14px;
+            background: linear-gradient(135deg, rgba(79, 140, 255, 0.92), rgba(139, 140, 255, 0.88));
+            color: #06111a;
+            font-weight: 900;
+        }
+
+        .composer button:disabled {
+            opacity: 0.38;
+            cursor: not-allowed;
+        }
+
+        .right-rail {
+            border-left: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(9, 10, 15, 0.98), rgba(6, 7, 11, 0.98));
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow: auto;
+        }
+
+        .profile-card,
+        .status-card {
+            border-radius: 20px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(15, 17, 25, 0.98), rgba(9, 10, 14, 0.98));
+            padding: 16px;
+        }
+
+        .profile-avatar {
+            width: 70px;
+            height: 70px;
+            border-radius: 22px;
+            display: grid;
+            place-items: center;
+            margin-bottom: 14px;
+            background: radial-gradient(circle at 30% 30%, rgba(139, 140, 255, 0.24), rgba(79, 140, 255, 0.12));
+            border: 1px solid rgba(139, 140, 255, 0.20);
+            color: var(--accent);
+            font-size: 22px;
+            font-weight: 900;
+        }
+
+        .profile-card h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .profile-meta {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 14px;
+        }
+
+        .profile-line {
+            margin-top: 10px;
+            border-top: 1px solid var(--line);
+            padding-top: 10px;
+        }
+
+        .label {
+            display: block;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.16em;
+            font-size: 10px;
+            font-weight: 800;
+            margin-bottom: 6px;
+        }
+
+        .key-block {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #9fe7ff;
+            word-break: break-all;
+            background: rgba(3, 4, 7, 0.92);
+            border: 1px solid rgba(139, 140, 255, 0.16);
+            padding: 12px;
+            border-radius: 16px;
+        }
+
+        .engine-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 999px;
+            background: rgba(16, 185, 129, 0.08);
+            border: 1px solid rgba(16, 185, 129, 0.24);
+            color: #8ef0c8;
+            font-size: 12px;
+            font-weight: 800;
+            width: fit-content;
+        }
+
+        .engine-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            background: var(--success);
+            box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.34);
+            animation: pulse 1.8s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.38);
+            }
+            70% {
+                box-shadow: 0 0 0 12px rgba(16, 185, 129, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+            }
+        }
+
+        .status-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .status-list.spaced {
+            margin-top: 14px;
+        }
+
+        .status-item {
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: rgba(4, 5, 8, 0.92);
+            padding: 12px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .dashboard-banner {
+            margin-bottom: 14px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        body[data-privacy-mode="ghost"] .comment-input,
+        body[data-privacy-mode="ghost"] .comment-button {
+            pointer-events: none;
+        }
+
+        body[data-privacy-mode="ghost"] .comment-input {
+            border-color: rgba(239, 68, 68, 0.22);
+        }
+
+        body[data-privacy-mode="semi-private"] .chat-head[data-handshake="pending"] {
+            opacity: 0.88;
+        }
+
+        body[data-privacy-mode="semi-private"] .chat-head[data-handshake="pending"] .avatar {
+            border-color: rgba(239, 68, 68, 0.22);
+            color: #fca5a5;
+        }
+
+        @media (max-width: 1180px) {
+            .dashboard-shell {
+                grid-template-columns: 84px minmax(0, 1fr);
+            }
+
+            .right-rail {
+                display: none;
+            }
+        }
+
+        @media (max-width: 880px) {
+            body {
+                overflow: auto;
+            }
+
+            .wizard-stage {
+                width: min(100vw, 100%);
+                padding: 12px;
+            }
+
+            .wizard-card {
+                border-radius: 22px;
+                padding: 22px;
+            }
+
+            .dashboard-shell {
+                height: auto;
+                min-height: 100vh;
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto 1fr;
+            }
+
+            .left-rail {
+                border-right: none;
+                border-bottom: 1px solid var(--line);
+                flex-direction: row;
+                justify-content: space-between;
+                padding: 12px 16px;
+            }
+
+            .nav-stack {
+                flex-direction: row;
+                width: auto;
+                margin-top: 0;
+            }
+
+            .social-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .chat-heads {
+                border-right: none;
+                border-bottom: 1px solid var(--line);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-root">
+        <section id="stage-1" class="wizard-stage">
+            <div class="wizard-card">
+                <div class="eyebrow">Verification Gate</div>
+                <h1 class="wizard-title">Last Step Left</h1>
+                <p class="wizard-subtitle">This app is more secure than others. Your data belongs to ONLY you.</p>
+                <button type="button" class="accent-button" id="stage-1-continue">Continue</button>
+            </div>
+        </section>
+
+        <section id="stage-2" class="wizard-stage hidden" aria-labelledby="privacy-title">
+            <div class="wizard-card">
+                <div class="eyebrow">Privacy Mode Configuration</div>
+                <h2 class="wizard-title privacy-title" id="privacy-title">Choose Your Privacy Mode</h2>
+                <p class="wizard-subtitle">Pick the operating profile that will govern how your social layer behaves after setup.</p>
+
+                <div class="mode-list" id="mode-list">
+                    <button type="button" class="mode-card" data-mode="ghost" aria-pressed="false">
+                        <div class="mode-card-header">
+                            <span class="mode-pill">1</span>
+                            <span>Ghost Mode</span>
+                        </div>
+                        <div class="mode-description">Talk to contacts only. No messaging or commenting on random profiles. You can only view and like posts/reels. Pure stealth mode.</div>
+                    </button>
+
+                    <button type="button" class="mode-card" data-mode="semi-private" aria-pressed="false">
+                        <div class="mode-card-header">
+                            <span class="mode-pill">2</span>
+                            <span>Semi-Private</span>
+                        </div>
+                        <div class="mode-description">Full interactions allowed, but DMs are locked until they accept your follow request. Safe and controlled social experience.</div>
+                    </button>
+
+                    <button type="button" class="mode-card" data-mode="public" aria-pressed="false">
+                        <div class="mode-card-header">
+                            <span class="mode-pill">3</span>
+                            <span>Public Node</span>
+                        </div>
+                        <div class="mode-description">Zero limits. Everything you post is visible globally on the internet. Follow, chat, and share freely with anyone.</div>
+                    </button>
+                </div>
+
+                <button type="button" class="accent-button" id="enter-dashboard" disabled>Enter Dashboard</button>
+                <div class="wizard-note" id="wizard-note" aria-live="polite"></div>
+            </div>
+        </section>
+
+        <section id="dashboard-shell" class="dashboard-shell hidden" aria-label="Social Media Dashboard">
+            <aside class="left-rail">
+                <div class="rail-brand">TN</div>
+                <div class="nav-stack" aria-label="Dashboard navigation">
+                    <button type="button" class="nav-item active" data-nav="home" aria-label="Home Feed">
+                        <strong>⌂</strong>
+                        <span>Home Feed</span>
+                    </button>
+                    <button type="button" class="nav-item" data-nav="dm" aria-label="Direct Messages">
+                        <strong>✉</strong>
+                        <span>DM</span>
+                    </button>
+                    <button type="button" class="nav-item" data-nav="profile" aria-label="Profile Settings">
+                        <strong>⚙</strong>
+                        <span>Profile</span>
+                    </button>
+                </div>
+            </aside>
+
+            <main class="center-pane">
+                <section class="feed-strip">
+                    <div class="feed-header">
+                        <div>
+                            <div class="section-label">Home Feed</div>
+                            <div class="dashboard-banner">Your privacy mode now controls how social actions behave across the feed and messenger.</div>
+                        </div>
+                        <div class="mode-chip" id="active-mode-chip">Mode Unset</div>
+                    </div>
+                    <div class="feed-cards">
+                        <article class="post-card">
+                            <div class="post-meta">
+                                <span>@signal-lane</span>
+                                <span>Just now</span>
+                            </div>
+                            <h4>Morning pulse check</h4>
+                            <p>Signals are stable. The network feels quiet, but the P2P layer is still alive and responsive.</p>
+                            <div class="comment-row">
+                                <input type="text" class="comment-input" data-comment-compose placeholder="Write a comment..." />
+                                <button type="button" class="comment-button" data-comment-action>Comment</button>
+                            </div>
+                        </article>
+
+                        <article class="post-card">
+                            <div class="post-meta">
+                                <span>@blue-node</span>
+                                <span>12m</span>
+                            </div>
+                            <h4>Trust sync update</h4>
+                            <p>Peer scoring is updating in real time. Privacy rules are evaluated before each social action is sent.</p>
+                            <div class="comment-row">
+                                <input type="text" class="comment-input" data-comment-compose placeholder="Write a comment..." />
+                                <button type="button" class="comment-button" data-comment-action>Comment</button>
+                            </div>
+                        </article>
+                    </div>
+                </section>
+
+                <section class="social-grid">
+                    <aside class="chat-heads" aria-label="Active chat heads">
+                        <div class="section-label spaced">Active Chat Heads</div>
+                        <button type="button" class="chat-head active" data-peer-id="rajasthan_peer_01" data-handshake="accepted">
+                            <div class="avatar">RP</div>
+                            <div class="meta">
+                                <strong>Rajasthan_Peer_01</strong>
+                                <span>Device Contact</span>
+                                <div class="handshake-pill">Handshake accepted</div>
+                            </div>
+                        </button>
+
+                        <button type="button" class="chat-head" data-peer-id="random_node_77" data-handshake="pending">
+                            <div class="avatar">RN</div>
+                            <div class="meta">
+                                <strong>Random_Node_77</strong>
+                                <span>External Mesh Node</span>
+                                <div class="handshake-pill pending">Handshake pending</div>
+                            </div>
+                        </button>
+                    </aside>
+
+                    <section class="chat-window" aria-label="Chat window">
+                        <div class="chat-header">
+                            <div>
+                                <h3 id="active-chat-title">Rajasthan_Peer_01</h3>
+                                <p id="active-chat-subtitle">Secure contact channel is ready.</p>
+                            </div>
+                            <div class="chat-state" id="chat-state-label">Messaging enabled</div>
+                        </div>
+
+                        <div class="chat-log" id="chat-log">
+                            <div class="message-bubble inbound">Connection initialized securely over node sync channels.</div>
+                            <div class="message-bubble outbound">Acknowledged. Storage arrays are operating locally.</div>
+                            <div class="message-bubble inbound">Ready to exchange status updates or route requests.</div>
+                        </div>
+
+                        <div class="composer" id="composer">
+                            <input type="text" id="chat-input" placeholder="Type a secure message..." />
+                            <button type="button" id="send-message">Send</button>
+                        </div>
+                    </section>
+                </section>
+            </main>
+
+            <aside class="right-rail">
+                <section class="profile-card">
+                    <div class="profile-avatar" id="profile-avatar">U</div>
+                    <h3 id="display-profile-name">Verified Node</h3>
+                    <p class="profile-meta">A live identity panel with the selected privacy mode, the generated public key id, and the current network presence state.</p>
+
+                    <div class="profile-line">
+                        <span class="label">Privacy Mode</span>
+                        <div class="key-block" id="privacy-mode-label">Not selected</div>
+                    </div>
+
+                    <div class="profile-line">
+                        <span class="label">Public Key ID</span>
+                        <div class="key-block" id="display-public-key-string">Not generated yet</div>
+                    </div>
+                </section>
+
+                <section class="status-card">
+                    <div class="engine-status">
+                        <span class="engine-dot"></span>
+                        P2P Engine: Active
+                    </div>
+                    <div class="status-list spaced">
+                        <div class="status-item" id="status-summary">
+                            The dashboard will unlock after the privacy mode is saved to SQLite.
+                        </div>
+                        <div class="status-item">
+                            Local enforcement applies immediately after the selected mode is loaded into the JS layer.
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </section>
+    </div>
+
+    <script nonce="{{ csp_nonce }}">
+        (() => {
+            const state = {
+                dashboardToken: sessionStorage.getItem("trust_dashboard_token") || "",
+                username: "",
+                privacyMode: "",
+                privacyLabel: "",
+                publicKeyId: "",
+                selectedPeerId: "rajasthan_peer_01",
+                selectedPeerHandshake: "accepted"
+            };
+
+            const modeLabels = {
+                ghost: "Ghost Mode",
+                "semi-private": "Semi-Private",
+                public: "Public Node"
+            };
+
+            const els = {
+                stage1: document.getElementById("stage-1"),
+                stage2: document.getElementById("stage-2"),
+                dashboard: document.getElementById("dashboard-shell"),
+                stage1Continue: document.getElementById("stage-1-continue"),
+                enterDashboard: document.getElementById("enter-dashboard"),
+                wizardNote: document.getElementById("wizard-note"),
+                modeCards: Array.from(document.querySelectorAll(".mode-card")),
+                commentInputs: Array.from(document.querySelectorAll("[data-comment-compose]")),
+                commentActions: Array.from(document.querySelectorAll("[data-comment-action]")),
+                chatHeads: Array.from(document.querySelectorAll(".chat-head")),
+                activeChatTitle: document.getElementById("active-chat-title"),
+                activeChatSubtitle: document.getElementById("active-chat-subtitle"),
+                chatStateLabel: document.getElementById("chat-state-label"),
+                chatInput: document.getElementById("chat-input"),
+                sendMessage: document.getElementById("send-message"),
+                profileAvatar: document.getElementById("profile-avatar"),
+                displayProfileName: document.getElementById("display-profile-name"),
+                privacyModeLabel: document.getElementById("privacy-mode-label"),
+                publicKeyId: document.getElementById("display-public-key-string"),
+                activeModeChip: document.getElementById("active-mode-chip"),
+                statusSummary: document.getElementById("status-summary")
+            };
+
+            function showStage(stage) {
+                els.stage1.classList.toggle("hidden", stage !== "stage1");
+                els.stage2.classList.toggle("hidden", stage !== "stage2");
+                els.dashboard.classList.toggle("hidden", stage !== "dashboard");
+            }
+
+            function setNote(message, isError = false) {
+                els.wizardNote.textContent = message;
+                els.wizardNote.classList.toggle("error", isError);
+            }
+
+            function setSelectedMode(mode) {
+                state.privacyMode = mode;
+                sessionStorage.setItem("trust_privacy_mode_preview", mode);
+
+                els.modeCards.forEach((card) => {
+                    const isSelected = card.dataset.mode === mode;
+                    card.classList.toggle("selected", isSelected);
+                    card.setAttribute("aria-pressed", String(isSelected));
+                });
+
+                els.enterDashboard.disabled = !mode || !state.dashboardToken;
+            }
+
+            function getPeerLabel(peerId) {
+                return peerId === "rajasthan_peer_01" ? "Rajasthan_Peer_01" : "Random_Node_77";
+            }
+
+            function applyPrivacyRules() {
+                document.body.dataset.privacyMode = state.privacyMode || "";
+
+                const modeText = modeLabels[state.privacyMode] || "Not selected";
+                els.activeModeChip.textContent = modeText;
+                els.privacyModeLabel.textContent = modeText;
+
+                if (state.username) {
+                    els.displayProfileName.textContent = state.username;
+                    els.profileAvatar.textContent = state.username.slice(0, 2).toUpperCase();
+                }
+
+                if (state.publicKeyId) {
+                    els.publicKeyId.textContent = state.publicKeyId;
+                }
+
+                if (state.privacyMode === "ghost") {
+                    els.commentInputs.forEach((input) => {
+                        input.disabled = true;
+                        input.placeholder = "Comments are disabled in Ghost Mode";
+                    });
+                    els.commentActions.forEach((button) => {
+                        button.disabled = true;
+                    });
+                } else {
+                    els.commentInputs.forEach((input) => {
+                        input.disabled = false;
+                        input.placeholder = "Write a comment...";
+                    });
+                    els.commentActions.forEach((button) => {
+                        button.disabled = false;
+                    });
+                }
+
+                const peerAccepted = state.selectedPeerHandshake === "accepted";
+                const allowMessaging = state.privacyMode === "public" || peerAccepted;
+
+                if (state.privacyMode === "semi-private" && !peerAccepted) {
+                    els.chatStateLabel.textContent = "Handshake required before sending";
+                    els.activeChatSubtitle.textContent = "This peer has not accepted your follow request yet.";
+                    els.chatInput.disabled = true;
+                    els.sendMessage.disabled = true;
+                    els.chatInput.placeholder = "Waiting for follow handshake...";
+                } else if (state.privacyMode === "ghost" && !peerAccepted) {
+                    els.chatStateLabel.textContent = "Contacts only";
+                    els.chatInput.disabled = true;
+                    els.sendMessage.disabled = true;
+                    els.chatInput.placeholder = "Ghost Mode allows contact-only messaging";
+                } else if (allowMessaging) {
+                    els.chatStateLabel.textContent = "Messaging enabled";
+                    els.chatInput.disabled = false;
+                    els.sendMessage.disabled = false;
+                    els.chatInput.placeholder = "Type a secure message...";
+                    els.activeChatSubtitle.textContent = peerAccepted
+                        ? "Secure contact channel is ready."
+                        : "Public routing is open for this peer.";
+                }
+
+                if (state.privacyMode === "public" && !peerAccepted) {
+                    els.chatStateLabel.textContent = "Open channel";
+                    els.chatInput.disabled = false;
+                    els.sendMessage.disabled = false;
+                    els.chatInput.placeholder = "Type a secure message...";
+                    els.activeChatSubtitle.textContent = "Public routing is open for this peer.";
+                }
+
+                if (state.privacyMode === "ghost" && peerAccepted) {
+                    els.chatStateLabel.textContent = "Contacts only";
+                    els.chatInput.disabled = false;
+                    els.sendMessage.disabled = false;
+                    els.chatInput.placeholder = "Type a secure message...";
+                    els.activeChatSubtitle.textContent = "Messaging is limited to trusted contacts.";
+                }
+            }
+
+            function selectPeer(peerId) {
+                state.selectedPeerId = peerId;
+                const selected = els.chatHeads.find((head) => head.dataset.peerId === peerId);
+                state.selectedPeerHandshake = selected ? selected.dataset.handshake : "pending";
+
+                els.chatHeads.forEach((head) => {
+                    head.classList.toggle("active", head.dataset.peerId === peerId);
+                });
+
+                els.activeChatTitle.textContent = getPeerLabel(peerId);
+                applyPrivacyRules();
+            }
+
+            function initializeDashboardFromUser(user) {
+                state.username = user.username || state.username;
+                state.privacyMode = user.privacy_mode || state.privacyMode;
+                state.publicKeyId = user.public_key_id || state.publicKeyId || "Not generated yet";
+                state.privacyLabel = user.privacy_mode_label || modeLabels[state.privacyMode] || "Not selected";
+
+                showStage("dashboard");
+                applyPrivacyRules();
+                selectPeer(state.selectedPeerId);
+
+                els.statusSummary.textContent = "Privacy mode loaded from SQLite. Local UI restrictions now follow the selected profile.";
+            }
+
+            async function loadUserDetails() {
+                if (!state.dashboardToken) {
+                    window.location.href = "/";
+                    return;
+                }
+
+                try {
+                    const response = await fetch("/api/auth/user-details", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ dashboard_token: state.dashboardToken })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error("session-invalid");
+                    }
+
+                    const user = await response.json();
+                    els.displayProfileName.textContent = user.username;
+                    els.profileAvatar.textContent = user.username.slice(0, 2).toUpperCase();
+                    els.publicKeyId.textContent = user.public_key_id || "Not generated yet";
+
+                    if (user.setup_completed) {
+                        state.username = user.username;
+                        state.privacyMode = user.privacy_mode || "public";
+                        state.publicKeyId = user.public_key_id || "Not generated yet";
+                        state.privacyLabel = user.privacy_mode_label || modeLabels[state.privacyMode] || "Public Node";
+                        initializeDashboardFromUser(user);
+                        return;
+                    }
+
+                    state.username = user.username;
+                    setSelectedMode(sessionStorage.getItem("trust_privacy_mode_preview") || "");
+                    showStage("stage1");
+                } catch (error) {
+                    window.location.href = "/";
+                }
+            }
+
+            async function commitSelectedMode() {
+                if (!state.dashboardToken || !state.privacyMode) {
+                    setNote("Choose a privacy mode before continuing.", true);
+                    return;
+                }
+
+                els.enterDashboard.disabled = true;
+                els.enterDashboard.textContent = "Saving...";
+                setNote("Saving your privacy mode to SQLite...");
+
+                try {
+                    const response = await fetch("/api/auth/save-mode", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            dashboard_token: state.dashboardToken,
+                            mode: state.privacyMode
+                        })
+                    });
+
+                    const payload = await response.json();
+                    if (!response.ok) {
+                        throw new Error(payload && payload.error ? payload.error : "save-failed");
+                    }
+
+                    state.username = payload.username || state.username;
+                    state.privacyMode = payload.privacy_mode || state.privacyMode;
+                    state.publicKeyId = payload.public_key_id || state.publicKeyId;
+                    state.privacyLabel = payload.privacy_mode_label || modeLabels[state.privacyMode] || "Public Node";
+                    sessionStorage.setItem("trust_privacy_mode_preview", state.privacyMode);
+
+                    initializeDashboardFromUser({
+                        username: state.username,
+                        privacy_mode: state.privacyMode,
+                        privacy_mode_label: state.privacyLabel,
+                        public_key_id: state.publicKeyId,
+                        setup_completed: true
+                    });
+                } catch (error) {
+                    setNote("Unable to save the privacy mode. Please try again.", true);
+                    els.enterDashboard.disabled = false;
+                    els.enterDashboard.textContent = "Enter Dashboard";
+                }
+            }
+
+            function bindEvents() {
+                els.stage1Continue.addEventListener("click", () => {
+                    showStage("stage2");
+                    setNote("Select one privacy mode to continue.");
+                });
+
+                els.modeCards.forEach((card) => {
+                    card.addEventListener("click", () => {
+                        setSelectedMode(card.dataset.mode);
+                        setNote(`Selected ${modeLabels[card.dataset.mode]}.`);
+                    });
+                });
+
+                els.enterDashboard.addEventListener("click", commitSelectedMode);
+
+                els.chatHeads.forEach((head) => {
+                    head.addEventListener("click", () => {
+                        selectPeer(head.dataset.peerId);
+                    });
+                });
+
+                document.getElementById("send-message").addEventListener("click", () => {
+                    if (els.chatInput.disabled) {
+                        return;
+                    }
+
+                    const text = els.chatInput.value.trim();
+                    if (!text) {
+                        return;
+                    }
+
+                    const bubble = document.createElement("div");
+                    bubble.className = "message-bubble outbound";
+                    bubble.textContent = text;
+                    document.getElementById("chat-log").appendChild(bubble);
+                    els.chatInput.value = "";
+                });
+            }
+
+            bindEvents();
+            loadUserDetails();
+        })();
+    </script>
+</body>
+</html>
