@@ -376,10 +376,36 @@
       const confirmPasswordInput = document.getElementById("confirmPassword");
       const statusBox = document.getElementById("statusBox");
       const signupBtn = document.getElementById("signupBtn");
+      const LOCAL_USERS_KEY = "trust_local_users";
 
       const setStatus = (message, variant) => {
         statusBox.textContent = message;
         statusBox.className = variant ? `status ${variant}` : "status";
+      };
+
+      const readLocalUsers = () => {
+        try {
+          return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || "{}");
+        } catch (_error) {
+          return {};
+        }
+      };
+
+      const saveLocalUsers = (users) => {
+        localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+      };
+
+      const saveLocalSignup = (username, email, passwordHash) => {
+        const users = readLocalUsers();
+        users[username] = {
+          username,
+          email,
+          password_hash: passwordHash,
+          privacy_mode: users[username]?.privacy_mode || "public",
+          public_key_id: users[username]?.public_key_id || "",
+          setup_completed: users[username]?.setup_completed || 0,
+        };
+        saveLocalUsers(users);
       };
 
       const computePasswordHash = async (value) => {
@@ -443,6 +469,14 @@
 
           const data = await readJsonSafe(response);
           if (!response.ok) {
+            if (response.status === 404 || (data.raw && String(data.raw).includes("NOT_FOUND"))) {
+              saveLocalSignup(username, email, passwordHash);
+              setStatus("Backend unavailable on this deployment. Account saved locally for demo mode.", "is-success");
+              setTimeout(() => {
+                window.location.href = "/";
+              }, 1500);
+              return;
+            }
             throw new Error(data.error || data.raw || "Unable to register account.");
           }
 

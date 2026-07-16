@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.py" },
+    { "source": "/", "destination": "/index.html" },
+    { "source": "/signup", "destination": "/signup.html" },
+    { "source": "/otp", "destination": "/otp.html" },
+    { "source": "/dashboard", "destination": "/dashboard.html" }
+  ]
+}

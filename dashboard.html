@@ -1023,7 +1023,8 @@
                 privacyLabel: "",
                 publicKeyId: "",
                 selectedPeerId: "rajasthan_peer_01",
-                selectedPeerHandshake: "accepted"
+                selectedPeerHandshake: "accepted",
+                demoMode: sessionStorage.getItem("trust_demo_mode") === "1"
             };
 
             const modeLabels = {
@@ -1055,6 +1056,49 @@
                 activeModeChip: document.getElementById("active-mode-chip"),
                 statusSummary: document.getElementById("status-summary")
             };
+
+            const LOCAL_USERS_KEY = "trust_local_users";
+
+            function readLocalUsers() {
+                try {
+                    return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || "{}");
+                } catch (_error) {
+                    return {};
+                }
+            }
+
+            function saveLocalUsers(users) {
+                localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+            }
+
+            function getLocalUser(username) {
+                return readLocalUsers()[username] || null;
+            }
+
+            function upsertLocalUser(username, patch) {
+                const users = readLocalUsers();
+                users[username] = {
+                    username,
+                    email: users[username]?.email || "",
+                    password_hash: users[username]?.password_hash || "",
+                    privacy_mode: "public",
+                    public_key_id: "",
+                    setup_completed: 0,
+                    ...users[username],
+                    ...patch
+                };
+                saveLocalUsers(users);
+                return users[username];
+            }
+
+            function generateLocalPublicKeyId() {
+                const seed = `${state.username}-${Date.now()}-${Math.random()}`;
+                let hash = 0;
+                for (let index = 0; index < seed.length; index += 1) {
+                    hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
+                }
+                return `0x${Math.abs(hash).toString(16).padStart(8, "0")}`;
+            }
 
             function showStage(stage) {
                 els.stage1.classList.toggle("hidden", stage !== "stage1");
@@ -1186,6 +1230,23 @@
             }
 
             async function loadUserDetails() {
+                if (state.demoMode) {
+                    const localUser = getLocalUser(sessionStorage.getItem("trust_username") || "");
+                    if (localUser) {
+                        initializeDashboardFromUser({
+                            username: localUser.username,
+                            privacy_mode: localUser.privacy_mode || "public",
+                            privacy_mode_label: modeLabels[localUser.privacy_mode] || "Public Node",
+                            public_key_id: localUser.public_key_id || "Not generated yet",
+                            setup_completed: true
+                        });
+                        return;
+                    }
+
+                    window.location.href = "/";
+                    return;
+                }
+
                 if (!state.dashboardToken) {
                     window.location.href = "/";
                     return;
@@ -1220,6 +1281,20 @@
                     setSelectedMode(sessionStorage.getItem("trust_privacy_mode_preview") || "");
                     showStage("stage1");
                 } catch (error) {
+                    const localUser = getLocalUser(sessionStorage.getItem("trust_username") || "");
+                    if (localUser) {
+                        state.demoMode = true;
+                        sessionStorage.setItem("trust_demo_mode", "1");
+                        initializeDashboardFromUser({
+                            username: localUser.username,
+                            privacy_mode: localUser.privacy_mode || "public",
+                            privacy_mode_label: modeLabels[localUser.privacy_mode] || "Public Node",
+                            public_key_id: localUser.public_key_id || "Not generated yet",
+                            setup_completed: true
+                        });
+                        return;
+                    }
+
                     window.location.href = "/";
                 }
             }
@@ -1232,7 +1307,26 @@
 
                 els.enterDashboard.disabled = true;
                 els.enterDashboard.textContent = "Saving...";
-                setNote("Saving your privacy mode to SQLite...");
+                setNote(state.demoMode ? "Saving your privacy mode locally..." : "Saving your privacy mode to SQLite...");
+
+                if (state.demoMode) {
+                    const publicKeyId = state.publicKeyId || generateLocalPublicKeyId();
+                    const localUser = upsertLocalUser(state.username, {
+                        privacy_mode: state.privacyMode,
+                        public_key_id: publicKeyId,
+                        setup_completed: 1
+                    });
+
+                    sessionStorage.setItem("trust_privacy_mode_preview", state.privacyMode);
+                    initializeDashboardFromUser({
+                        username: localUser.username,
+                        privacy_mode: localUser.privacy_mode,
+                        privacy_mode_label: modeLabels[localUser.privacy_mode] || "Public Node",
+                        public_key_id: localUser.public_key_id,
+                        setup_completed: true
+                    });
+                    return;
+                }
 
                 try {
                     const response = await fetch("/api/auth/save-mode", {
@@ -1246,6 +1340,12 @@
 
                     const payload = await response.json();
                     if (!response.ok) {
+                        if (response.status === 404 || (payload && String(payload.error || payload.raw || "").includes("NOT_FOUND"))) {
+                            state.demoMode = true;
+                            sessionStorage.setItem("trust_demo_mode", "1");
+                            commitSelectedMode();
+                            return;
+                        }
                         throw new Error(payload && payload.error ? payload.error : "save-failed");
                     }
 
@@ -1263,6 +1363,13 @@
                         setup_completed: true
                     });
                 } catch (error) {
+                    if (!state.demoMode) {
+                        state.demoMode = true;
+                        sessionStorage.setItem("trust_demo_mode", "1");
+                        commitSelectedMode();
+                        return;
+                    }
+
                     setNote("Unable to save the privacy mode. Please try again.", true);
                     els.enterDashboard.disabled = false;
                     els.enterDashboard.textContent = "Enter Dashboard";
