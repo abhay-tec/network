@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import argparse
+import os
+import smtplib
 import sys
+import ssl
+from email.message import EmailMessage
 
 from flask import Flask, g, jsonify, request, render_template, send_from_directory
 
@@ -77,6 +81,82 @@ def _generate_dashboard_token() -> str:
 def _generate_public_key_id(username: str) -> str:
     payload = f"{username}-{time.time()}-{secrets.token_hex(8)}"
     return "0x" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _mask_email(email: str) -> str:
+    if "@" not in email:
+        return email
+
+    local_part, domain = email.split("@", 1)
+    if len(local_part) <= 2:
+        masked_local = local_part[0] + "*"
+    else:
+        masked_local = local_part[:2] + "*" * max(2, min(4, len(local_part) - 2))
+    return f"{masked_local}@{domain}"
+
+
+def _smtp_config() -> dict[str, Any]:
+    host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
+    username = os.getenv("SMTP_USERNAME", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "").strip()
+    from_email = os.getenv("OTP_FROM_EMAIL", "").strip() or username
+    use_tls_value = os.getenv("SMTP_USE_TLS", "1").strip().lower()
+    timeout_raw = os.getenv("SMTP_TIMEOUT", "10").strip()
+
+    try:
+        port = int(os.getenv("SMTP_PORT", "587").strip())
+    except ValueError:
+        port = 587
+
+    try:
+        timeout = float(timeout_raw)
+    except ValueError:
+        timeout = 10.0
+
+    return {
+        "host": host,
+        "port": port,
+        "username": username,
+        "password": password,
+        "from_email": from_email,
+        "use_tls": use_tls_value not in {"0", "false", "no"},
+        "timeout": timeout,
+    }
+
+
+def _send_otp_email(session: AuthSession) -> None:
+    settings = _smtp_config()
+    if not settings["host"] or not settings["username"] or not settings["password"]:
+        raise RuntimeError("SMTP credentials are not configured.")
+
+    if not session.email:
+        raise RuntimeError("Recipient email is missing.")
+
+    otp_code = _issue_otp(session, "gmail")
+    message = EmailMessage()
+    message["Subject"] = "Trust System OTP Verification"
+    message["From"] = settings["from_email"]
+    message["To"] = session.email
+    message.set_content(
+        "\n".join(
+            [
+                f"Hi {session.username},",
+                "",
+                "Thanks for making acc here is your otp:",
+                otp_code,
+                "",
+                f"This code expires in {SESSION_TTL_SECONDS // 60} minute.",
+                "If you did not request this, you can ignore this email.",
+            ]
+        )
+    )
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(settings["host"], settings["port"], timeout=settings["timeout"]) as smtp:
+        if settings["use_tls"]:
+            smtp.starttls(context=context)
+        smtp.login(settings["username"], settings["password"])
+        smtp.send_message(message)
 
 
 def _json_error(message: str, status_code: int, code: str) -> tuple[Any, int]:
@@ -370,7 +450,6 @@ def api_login_step1():
     if not hmac.compare_digest(user["password_hash"], password_hash):
         return _json_error("Identity not verified in network storage.", 401, "unauthorized")
 
-    tx_token = _generate_tx_token()
     session_obj = AuthSession(
         username=username,
         password_hash=password_hash,
@@ -378,13 +457,22 @@ def api_login_step1():
         email=user["email"],
         channel="gmail",
     )
-    otp_code = _issue_otp(session_obj, "gmail")
+    try:
+        _send_otp_email(session_obj)
+    except Exception:
+        return _json_error(
+            "OTP email delivery failed. Check SMTP settings and try again.",
+            503,
+            "email_delivery_failed",
+        )
+
+    tx_token = _generate_tx_token()
     _add_auth_session(tx_token, session_obj)
 
     print(f"--- SECURITY CHANNEL EMULATION ---")
     print(f"Target Identity: {username} ({user['email']})")
     print(f"Channel: Gmail Routing Framework")
-    print(f"Dispatched Verification OTP: {otp_code}")
+    print(f"Dispatched Verification OTP: sent via email")
     print(f"----------------------------------")
 
     return jsonify(
@@ -392,7 +480,36 @@ def api_login_step1():
             "status": "handshake_started",
             "tx_token": tx_token,
             "channel": "gmail",
-            "debug_otp": otp_code,
+            "message": "OTP sent to your registered Gmail address.",
+            "email_hint": _mask_email(user["email"]),
+        }
+    )
+
+
+def _resend_email_otp(tx_token: str) -> tuple[Any, int]:
+    _, session = _get_auth_session(tx_token)
+    if session is None:
+        return _json_error("Invalid context transaction.", 401, "session_expired")
+
+    if _session_expired(session):
+        _purge_session(tx_token)
+        return _json_error("Handshake expired. Restart authorization.", 401, "session_expired")
+
+    try:
+        _send_otp_email(session)
+    except Exception:
+        return _json_error(
+            "OTP email delivery failed. Check SMTP settings and try again.",
+            503,
+            "email_delivery_failed",
+        )
+
+    return jsonify(
+        {
+            "status": "resent",
+            "channel": "gmail",
+            "message": "A fresh OTP was sent to your Gmail address.",
+            "email_hint": _mask_email(session.email),
         }
     )
 
@@ -404,73 +521,26 @@ def api_get_otp():
 
     data = request.get_json() or {}
     tx_token = data.get("tx_token", "").strip()
-    email = data.get("email", "").strip()
-
-    if not tx_token or not email:
+    if not tx_token:
         return _json_error("Required verification context missing.", 400, "missing_fields")
-
-    _, session = _get_auth_session(tx_token)
-    if session is None:
-        return _json_error("Invalid context transaction.", 401, "session_expired")
-
-    if _session_expired(session):
-        _purge_session(tx_token)
-        return _json_error("Handshake expired. Restart authorization.", 401, "session_expired")
-
-    session.email = email
-    otp_code = _issue_otp(session, "gmail")
-
-    print(f"--- SECURITY CHANNEL EMULATION ---")
-    print(f"Target Identity: {session.username} ({session.email})")
-    print(f"Channel: Gmail Routing Framework")
-    print(f"Dispatched Verification OTP: {otp_code}")
-    print(f"----------------------------------")
-
-    return jsonify(
-        {
-            "status": "routed",
-            "channel": "gmail",
-            "message": "Verification matrix sent via Gmail.",
-            "debug_otp": otp_code,
-        }
-    )
+    return _resend_email_otp(tx_token)
 
 
-@app.route("/api/auth/resend-whatsapp", methods=["POST"])
-def api_resend_whatsapp():
+@app.route("/api/auth/resend-otp", methods=["POST"])
+def api_resend_otp():
     if not request.is_json:
         return _json_error("Content-Type must be application/json", 400, "bad_request")
 
     data = request.get_json() or {}
     tx_token = data.get("tx_token", "").strip()
+    if not tx_token:
+        return _json_error("Required verification context missing.", 400, "missing_fields")
+    return _resend_email_otp(tx_token)
 
-    _, session = _get_auth_session(tx_token)
-    if session is None:
-        return _json_error("Invalid context transaction.", 401, "session_expired")
 
-    if _session_expired(session):
-        _purge_session(tx_token)
-        return _json_error("Handshake expired. Restart authorization.", 401, "session_expired")
-
-    new_otp = _generate_otp()
-    session.otp_code = new_otp
-    session.channel = "whatsapp"
-    session.expires_at = _now() + SESSION_TTL_SECONDS
-
-    print(f"--- SECURITY CHANNEL EMULATION ---")
-    print(f"Target Identity: {session.username}")
-    print(f"Channel: WhatsApp Mesh Core")
-    print(f"Dispatched Verification OTP: {new_otp}")
-    print(f"----------------------------------")
-
-    return jsonify(
-        {
-            "status": "routed",
-            "channel": "whatsapp",
-            "message": "Verification matrix sent via WhatsApp.",
-            "debug_otp": new_otp,
-        }
-    )
+@app.route("/api/auth/resend-whatsapp", methods=["POST"])
+def api_resend_whatsapp():
+    return _json_error("WhatsApp routing is disabled. Use Gmail delivery.", 410, "unsupported_channel")
 
 
 @app.route("/api/auth/verify", methods=["POST"])
