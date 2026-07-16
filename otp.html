@@ -443,31 +443,28 @@
             <div class="chip" id="userChip">User: pending</div>
           </div>
 
-          <div id="gmailGroup" class="field-group">
-            <label for="gmailInput">Enter your Gmail</label>
-            <div class="input-wrapper">
-              <input id="gmailInput" class="input" type="email" placeholder="name@gmail.com" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-            </div>
+          <div class="help-row" style="margin-top: 0; margin-bottom: 12px;">
+            <span class="help-dot" aria-hidden="true"></span>
+            <span id="deliveryHint">OTP sent to your registered Gmail address.</span>
           </div>
 
-          <div id="otpGroup" class="field-group is-hidden">
+          <div id="otpGroup" class="field-group">
             <label for="otpInput">Type OTP</label>
             <div class="input-wrapper">
-              <input id="otpInput" class="input" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP" disabled autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+              <input id="otpInput" class="input" type="text" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
             </div>
             <div class="help-row">
               <span class="help-dot" aria-hidden="true"></span>
-              <span>OTP field unlocks after Gmail dispatch.</span>
+              <span>Check your Gmail inbox and paste the code here.</span>
             </div>
           </div>
 
-          <button id="actionBtn" class="button" type="button">Get OTP</button>
-          <button id="whatsappBtn" class="button secondary" type="button">Use WhatsApp</button>
+          <button id="actionBtn" class="button" type="button">Verify OTP</button>
+          <button id="resendBtn" class="button secondary" type="button">Resend OTP</button>
           <div id="statusBox" class="status" aria-live="polite"></div>
-          <div id="devOtpBox" class="dev-otp" aria-live="polite"></div>
           <div id="dashboard" class="dashboard" aria-live="polite"></div>
 
-          <div class="fineprint">The first click sends the OTP. The same button changes to Done.</div>
+          <div class="fineprint">The OTP is delivered to your Gmail inbox. Use the code here to continue.</div>
         </div>
       </div>
 
@@ -479,39 +476,23 @@
       const txToken = sessionStorage.getItem("trust_tx_token") || new URLSearchParams(window.location.search).get("tx") || "";
       const username = sessionStorage.getItem("trust_username") || new URLSearchParams(window.location.search).get("u") || "unknown";
 
-      const gmailInput = document.getElementById("gmailInput");
       const otpInput = document.getElementById("otpInput");
       const actionBtn = document.getElementById("actionBtn");
-      const whatsappBtn = document.getElementById("whatsappBtn");
+      const resendBtn = document.getElementById("resendBtn");
       const statusBox = document.getElementById("statusBox");
-      const devOtpBox = document.getElementById("devOtpBox");
       const dashboard = document.getElementById("dashboard");
       const channelChip = document.getElementById("channelChip");
       const userChip = document.getElementById("userChip");
-      const gmailGroup = document.getElementById("gmailGroup");
-      const otpGroup = document.getElementById("otpGroup");
-
-      const state = {
-        step: "send_otp",
-        channel: "gmail",
-      };
+      const deliveryHint = document.getElementById("deliveryHint");
 
       userChip.textContent = `User: ${username}`;
+      deliveryHint.textContent = sessionStorage.getItem("trust_email_hint")
+        ? `OTP sent to ${sessionStorage.getItem("trust_email_hint")}.`
+        : "OTP sent to your registered Gmail address.";
 
       const setStatus = (message, variant) => {
         statusBox.textContent = message;
         statusBox.className = variant ? `status ${variant}` : "status";
-      };
-
-      const setDevOtp = (otp) => {
-        if (!otp) {
-          devOtpBox.textContent = "";
-          devOtpBox.className = "dev-otp";
-          return;
-        }
-
-        devOtpBox.textContent = `Local OTP: ${otp}  This is visible only on localhost for now.`;
-        devOtpBox.className = "dev-otp is-active";
       };
 
       const digitsOnly = (value) => value.replace(/\D/g, "").slice(0, 6);
@@ -540,31 +521,20 @@
         return data;
       };
 
-      const lockOtpStep = () => {
-        gmailInput.disabled = true;
-        otpGroup.classList.remove("is-hidden");
-        otpInput.disabled = false;
-        otpInput.focus({ preventScroll: true });
-        actionBtn.textContent = "Done";
-        actionBtn.classList.add("confirm");
-        state.step = "verify";
-      };
-
       function finalizeDashboard(payload) {
-  // Save dashboard token for authorization handshake verification
-  if (payload.dashboard_token) {
-    sessionStorage.setItem("trust_dashboard_token", payload.dashboard_token);
-  }
-  setStatus("Identity confirmed. Access granted.", "is-success");
-  setTimeout(() => {
-    window.location.href = "/dashboard";
-  }, 1000);
-}
+        if (payload.dashboard_token) {
+          sessionStorage.setItem("trust_dashboard_token", payload.dashboard_token);
+        }
+        setStatus("Identity confirmed. Access granted.", "is-success");
+        setTimeout(() => {
+          window.location.href = "/dashboard";
+        }, 1000);
+      }
 
       if (!txToken) {
         setStatus("Transaction token missing. Please login again.", "is-error");
         actionBtn.disabled = true;
-        whatsappBtn.disabled = true;
+        resendBtn.disabled = true;
       }
 
       otpInput.addEventListener("input", () => {
@@ -577,37 +547,6 @@
           return;
         }
 
-        if (state.step === "send_otp") {
-          const email = gmailInput.value.trim();
-          if (!email || !email.includes("@")) {
-            setStatus("Please enter a valid Gmail address.", "is-error");
-            return;
-          }
-
-          actionBtn.disabled = true;
-          actionBtn.textContent = "Getting OTP...";
-
-          try {
-            const data = await requestJson("/api/auth/get-otp", {
-              tx_token: txToken,
-              email,
-            });
-
-            channelChip.textContent = "Channel: Gmail";
-            setDevOtp(data.debug_otp || "");
-            setStatus(data.message || "OTP sent to Gmail.", "is-success");
-            lockOtpStep();
-          } catch (error) {
-            setStatus(error.message || "Unable to dispatch OTP.", "is-error");
-          } finally {
-            actionBtn.disabled = false;
-            if (state.step === "send_otp") {
-              actionBtn.textContent = "Get OTP";
-            }
-          }
-          return;
-        }
-
         const otpCode = otpInput.value.trim();
         if (otpCode.length !== 6) {
           setStatus("Enter the 6-digit OTP.", "is-error");
@@ -615,7 +554,7 @@
         }
 
         actionBtn.disabled = true;
-        actionBtn.textContent = "Confirming...";
+        actionBtn.textContent = "Verifying...";
 
         try {
           const data = await requestJson("/api/auth/verify", {
@@ -624,35 +563,38 @@
           });
           finalizeDashboard(data.dashboard_payload || {});
           otpInput.disabled = true;
-          whatsappBtn.disabled = true;
+          resendBtn.disabled = true;
           actionBtn.textContent = "Done";
         } catch (error) {
           setStatus(error.message || "Verification failed.", "is-error");
           actionBtn.disabled = false;
-          actionBtn.textContent = "Done";
+          actionBtn.textContent = "Verify OTP";
         }
       });
 
-      whatsappBtn.addEventListener("click", async () => {
+      resendBtn.addEventListener("click", async () => {
         if (!txToken) return;
 
-        whatsappBtn.disabled = true;
-        whatsappBtn.textContent = "Routing...";
+        resendBtn.disabled = true;
+        resendBtn.textContent = "Resending...";
 
         try {
-          const data = await requestJson("/api/auth/resend-whatsapp", { tx_token: txToken });
-          state.channel = "whatsapp";
-          channelChip.textContent = "Channel: WhatsApp";
-          setDevOtp(data.debug_otp || "");
-          setStatus(data.message || "Fresh OTP routed to WhatsApp.", "is-success");
+          const data = await requestJson("/api/auth/resend-otp", { tx_token: txToken });
+          channelChip.textContent = "Channel: Gmail";
+          deliveryHint.textContent = data.email_hint
+            ? `OTP sent to ${data.email_hint}.`
+            : "A fresh OTP was sent to your Gmail inbox.";
+          setStatus(data.message || "Fresh OTP sent to Gmail.", "is-success");
           otpInput.focus({ preventScroll: true });
         } catch (error) {
-          setStatus(error.message || "WhatsApp routing failed.", "is-error");
+          setStatus(error.message || "Unable to resend OTP.", "is-error");
         } finally {
-          whatsappBtn.disabled = false;
-          whatsappBtn.textContent = "Use WhatsApp";
+          resendBtn.disabled = false;
+          resendBtn.textContent = "Resend OTP";
         }
       });
+
+      otpInput.focus({ preventScroll: true });
     })();
   </script>
 </body>
