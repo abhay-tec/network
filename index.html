@@ -436,6 +436,9 @@
 
           sessionStorage.setItem("trust_tx_token", data.tx_token);
           sessionStorage.setItem("trust_username", username);
+          if (data.email_hint) {
+            sessionStorage.setItem("trust_email_hint", data.email_hint);
+          }
           window.location.href = "/otp";
         } catch (error) {
           setStatus(error.message || "Login failed.", "is-error");
