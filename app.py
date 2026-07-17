@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import secrets
 import threading
 import time
@@ -13,7 +15,7 @@ import os
 import smtplib
 import sys
 import ssl
-from email.message import EmailMessage
+from email.mime.text import MIMEText
 
 from flask import Flask, g, jsonify, request, render_template, send_from_directory
 
@@ -112,67 +114,49 @@ def _mask_email(email: str) -> str:
     return f"{masked_local}@{domain}"
 
 
+class SMTPNotConfiguredError(RuntimeError):
+    """Raised when Gmail SMTP credentials are not present in the environment."""
+
+
 def _smtp_config() -> dict[str, Any]:
-    host = os.getenv("SMTP_HOST", "smtp.gmail.com").strip()
-    username = os.getenv("SMTP_USERNAME", "").strip()
-    password = os.getenv("SMTP_PASSWORD", "").strip()
-    from_email = os.getenv("OTP_FROM_EMAIL", "").strip() or username
-    use_tls_value = os.getenv("SMTP_USE_TLS", "1").strip().lower()
-    timeout_raw = os.getenv("SMTP_TIMEOUT", "10").strip()
-
-    try:
-        port = int(os.getenv("SMTP_PORT", "587").strip())
-    except ValueError:
-        port = 587
-
-    try:
-        timeout = float(timeout_raw)
-    except ValueError:
-        timeout = 10.0
-
     return {
-        "host": host,
-        "port": port,
-        "username": username,
-        "password": password,
-        "from_email": from_email,
-        "use_tls": use_tls_value not in {"0", "false", "no"},
-        "timeout": timeout,
+        "host": "smtp.gmail.com",
+        "port": 587,
+        "email": os.environ.get("SMTP_EMAIL", "").strip(),
+        "password": os.environ.get("SMTP_PASSWORD", "").strip(),
+        "timeout": 15.0,
     }
 
 
 def _send_otp_email(session: AuthSession) -> None:
     settings = _smtp_config()
-    if not settings["host"] or not settings["username"] or not settings["password"]:
-        raise RuntimeError("SMTP credentials are not configured.")
+    if not settings["email"] or not settings["password"]:
+        raise SMTPNotConfiguredError("SMTP_EMAIL/SMTP_PASSWORD are not configured.")
 
     if not session.email:
         raise RuntimeError("Recipient email is missing.")
 
     otp_code = _issue_otp(session, "gmail")
-    message = EmailMessage()
-    message["Subject"] = "Trust System OTP Verification"
-    message["From"] = settings["from_email"]
-    message["To"] = session.email
-    message.set_content(
-        "\n".join(
-            [
-                f"Hi {session.username},",
-                "",
-                "Thanks for making acc here is your otp:",
-                otp_code,
-                "",
-                f"This code expires in {SESSION_TTL_SECONDS // 60} minute.",
-                "If you did not request this, you can ignore this email.",
-            ]
-        )
+    body = "\n".join(
+        [
+            f"Hi {session.username},",
+            "",
+            "Thanks for making acc here is your otp:",
+            otp_code,
+            "",
+            f"This code expires in {SESSION_TTL_SECONDS // 60} minute.",
+            "If you did not request this, you can ignore this email.",
+        ]
     )
+    message = MIMEText(body)
+    message["Subject"] = "Trust System OTP Verification"
+    message["From"] = settings["email"]
+    message["To"] = session.email
 
     context = ssl.create_default_context()
     with smtplib.SMTP(settings["host"], settings["port"], timeout=settings["timeout"]) as smtp:
-        if settings["use_tls"]:
-            smtp.starttls(context=context)
-        smtp.login(settings["username"], settings["password"])
+        smtp.starttls(context=context)
+        smtp.login(settings["email"], settings["password"])
         smtp.send_message(message)
 
 
@@ -180,27 +164,64 @@ def _json_error(message: str, status_code: int, code: str) -> tuple[Any, int]:
     return jsonify({"error": message, "code": code}), status_code
 
 
-def _dispatch_otp(session: AuthSession) -> tuple[bool, str | None]:
-    """Deliver the OTP email, falling back to a debug code when SMTP fails.
+# Signing key for client-side sync tokens. Set SYNC_SIGNING_KEY in the
+# environment so signatures survive serverless cold starts (a per-process
+# fallback is generated otherwise, in which case restore only works within the
+# same warm instance).
+_SYNC_SIGNING_KEY = os.environ.get("SYNC_SIGNING_KEY", "").strip() or secrets.token_hex(32)
+_SYNC_FIELDS = (
+    "id",
+    "username",
+    "email",
+    "password_hash",
+    "salt",
+    "created_at",
+    "privacy_mode",
+    "public_key_id",
+    "setup_completed",
+)
 
-    Test/dev environments (and Vercel) may lack SMTP credentials or outbound
-    network access. Rather than blocking the user, the failure is logged, an OTP
-    is generated locally, printed to the server console, and returned so the
-    login flow can continue. Returns (delivered, debug_otp) where debug_otp is
-    None on successful real delivery.
-    """
+
+def _sync_secret() -> bytes:
+    return _SYNC_SIGNING_KEY.encode("utf-8")
+
+
+def _make_sync_token(user: dict[str, Any]) -> str:
+    """Return an HMAC-signed, tamper-evident token encoding the user record."""
+    payload = {key: user.get(key) for key in _SYNC_FIELDS}
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).decode("ascii")
+    signature = hmac.new(_sync_secret(), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _verify_sync_token(token: str) -> dict[str, Any] | None:
+    """Validate a sync token's signature and return its payload, or None."""
     try:
-        _send_otp_email(session)
-        return True, None
-    except Exception as exc:
-        # Always issue a fresh code so resend renews both the OTP and its TTL,
-        # matching the successful-delivery path (which issues before sending).
-        otp_code = _issue_otp(session, "gmail")
-        print(
-            f"[OTP FALLBACK] SMTP delivery failed: {exc}. "
-            f"Dev OTP for {session.username}: {otp_code}"
-        )
-        return False, otp_code
+        encoded, signature = token.split(".", 1)
+    except ValueError:
+        return None
+
+    expected = hmac.new(_sync_secret(), encoded.encode("ascii"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        return None
+
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(encoded.encode("ascii")).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _sync_token_for_user(username: str) -> str | None:
+    user = _query_user(username)
+    if user is None:
+        return None
+    return _make_sync_token(user)
 
 
 def _record_to_dict(record: UserRecord) -> dict[str, Any]:
@@ -297,6 +318,59 @@ def _insert_user(username: str, email: str, password_hash: str) -> bool:
         return True
 
 
+def _restore_user_record(payload: dict[str, Any]) -> str:
+    """Rehydrate a user into the in-memory store from a verified sync payload.
+
+    Returns "restored" when the record was recreated, "exists" if the store
+    already holds the user, or "invalid" if the payload lacks required fields.
+    """
+    global _USER_ID_SEQ
+
+    username = str(payload.get("username", "")).strip()
+    email = str(payload.get("email", "")).strip()
+    password_hash = str(payload.get("password_hash", "")).strip()
+    if not username or not email or not password_hash:
+        return "invalid"
+
+    with _DB_LOCK:
+        if username in _USERS:
+            return "exists"
+
+        try:
+            record_id = int(payload.get("id") or 0)
+        except (TypeError, ValueError):
+            record_id = 0
+        if record_id <= 0:
+            record_id = _USER_ID_SEQ + 1
+
+        try:
+            created_at = float(payload.get("created_at") or _now())
+        except (TypeError, ValueError):
+            created_at = _now()
+
+        try:
+            setup_completed = int(payload.get("setup_completed") or 0)
+        except (TypeError, ValueError):
+            setup_completed = 0
+
+        public_key_id = payload.get("public_key_id")
+
+        _USERS[username] = UserRecord(
+            id=record_id,
+            username=username,
+            email=email,
+            password_hash=password_hash,
+            salt=str(payload.get("salt", "")),
+            created_at=created_at,
+            privacy_mode=str(payload.get("privacy_mode") or "public"),
+            public_key_id=public_key_id if public_key_id else None,
+            setup_completed=setup_completed,
+        )
+        if record_id > _USER_ID_SEQ:
+            _USER_ID_SEQ = record_id
+        return "restored"
+
+
 def _update_user_privacy_mode(username: str, mode: str, key_id: str) -> dict[str, Any] | None:
     with _DB_LOCK:
         record = _USERS.get(username)
@@ -389,7 +463,34 @@ def api_signup():
     if not success:
         return _json_error("Username is already bound to another cryptographic instance.", 409, "identity_conflict")
 
-    return jsonify({"status": "created", "message": "Cryptographic record stored."}), 201
+    return jsonify(
+        {
+            "status": "created",
+            "message": "Cryptographic record stored.",
+            "sync_token": _sync_token_for_user(username),
+        }
+    ), 201
+
+
+@app.route("/api/auth/sync-restore", methods=["POST"])
+def api_sync_restore():
+    if not request.is_json:
+        return _json_error("Content-Type must be application/json", 400, "bad_request")
+
+    data = request.get_json() or {}
+    sync_token = data.get("sync_token", "").strip()
+    if not sync_token:
+        return _json_error("Sync token missing.", 400, "missing_fields")
+
+    payload = _verify_sync_token(sync_token)
+    if payload is None:
+        return _json_error("Sync token is invalid or tampered.", 401, "invalid_sync_token")
+
+    result = _restore_user_record(payload)
+    if result == "invalid":
+        return _json_error("Sync token payload is incomplete.", 400, "invalid_payload")
+
+    return jsonify({"status": result, "username": str(payload.get("username", ""))})
 
 
 @app.route("/api/auth/step1", methods=["POST"])
@@ -418,32 +519,39 @@ def api_login_step1():
         email=user["email"],
         channel="gmail",
     )
-    delivered, debug_otp = _dispatch_otp(session_obj)
+    try:
+        _send_otp_email(session_obj)
+    except SMTPNotConfiguredError:
+        return _json_error(
+            "Email services are configuring. Please try again shortly.",
+            503,
+            "email_unconfigured",
+        )
+    except Exception:
+        return _json_error(
+            "OTP email delivery failed. Please try again.",
+            503,
+            "email_delivery_failed",
+        )
 
     tx_token = _generate_tx_token()
     _add_auth_session(tx_token, session_obj)
 
-    print(f"--- SECURITY CHANNEL EMULATION ---")
+    print("--- SECURITY CHANNEL EMULATION ---")
     print(f"Target Identity: {username} ({user['email']})")
-    print(f"Channel: Gmail Routing Framework")
-    print(f"Dispatched Verification OTP: {'sent via email' if delivered else 'console fallback (SMTP unavailable)'}")
-    print(f"----------------------------------")
+    print("Channel: Gmail Routing Framework")
+    print("Dispatched Verification OTP: sent via Gmail SMTP")
+    print("----------------------------------")
 
-    response_payload: dict[str, Any] = {
-        "status": "handshake_started",
-        "tx_token": tx_token,
-        "channel": "gmail",
-        "message": (
-            "OTP sent to your registered Gmail address."
-            if delivered
-            else "OTP email delivery unavailable; using debug code for testing."
-        ),
-        "email_hint": _mask_email(user["email"]),
-    }
-    if not delivered:
-        response_payload["debug_otp"] = debug_otp
-
-    return jsonify(response_payload)
+    return jsonify(
+        {
+            "status": "handshake_started",
+            "tx_token": tx_token,
+            "channel": "gmail",
+            "message": "OTP sent to your registered Gmail address.",
+            "email_hint": _mask_email(user["email"]),
+        }
+    )
 
 
 def _resend_email_otp(tx_token: str) -> tuple[Any, int]:
@@ -455,22 +563,29 @@ def _resend_email_otp(tx_token: str) -> tuple[Any, int]:
         _purge_session(tx_token)
         return _json_error("Handshake expired. Restart authorization.", 401, "session_expired")
 
-    delivered, debug_otp = _dispatch_otp(session)
+    try:
+        _send_otp_email(session)
+    except SMTPNotConfiguredError:
+        return _json_error(
+            "Email services are configuring. Please try again shortly.",
+            503,
+            "email_unconfigured",
+        )
+    except Exception:
+        return _json_error(
+            "OTP email delivery failed. Please try again.",
+            503,
+            "email_delivery_failed",
+        )
 
-    response_payload: dict[str, Any] = {
-        "status": "resent",
-        "channel": "gmail",
-        "message": (
-            "A fresh OTP was sent to your Gmail address."
-            if delivered
-            else "OTP email delivery unavailable; using debug code for testing."
-        ),
-        "email_hint": _mask_email(session.email),
-    }
-    if not delivered:
-        response_payload["debug_otp"] = debug_otp
-
-    return jsonify(response_payload)
+    return jsonify(
+        {
+            "status": "resent",
+            "channel": "gmail",
+            "message": "A fresh OTP was sent to your Gmail address.",
+            "email_hint": _mask_email(session.email),
+        }
+    )
 
 
 @app.route("/api/auth/get-otp", methods=["POST"])
@@ -587,6 +702,7 @@ def api_save_mode():
             "privacy_mode_label": PRIVACY_MODES[normalized_mode],
             "public_key_id": user["public_key_id"] or public_key_id,
             "setup_completed": bool(user["setup_completed"]),
+            "sync_token": _sync_token_for_user(session.username),
         }
     )
 

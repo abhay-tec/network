@@ -403,6 +403,32 @@
         }
       };
 
+      const SYNC_TOKENS_KEY = "trust_sync_tokens";
+
+      const getSyncToken = (username) => {
+        try {
+          return JSON.parse(localStorage.getItem(SYNC_TOKENS_KEY) || "{}")[username] || "";
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      // Rehydrate the serverless in-memory store from the signed browser token
+      // in case the RAM instance was reset by a cold start.
+      const restoreFromSyncToken = async (username) => {
+        const syncToken = getSyncToken(username);
+        if (!syncToken) return;
+        try {
+          await fetch("/api/auth/sync-restore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sync_token: syncToken }),
+          });
+        } catch (_error) {
+          // Best-effort restore; login proceeds and surfaces any real error.
+        }
+      };
+
       loginForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         setStatus("", "");
@@ -420,6 +446,7 @@
 
         try {
           const passwordHash = await computePasswordHash(password);
+          await restoreFromSyncToken(username);
           const response = await fetch("/api/auth/step1", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -438,11 +465,6 @@
           sessionStorage.setItem("trust_username", username);
           if (data.email_hint) {
             sessionStorage.setItem("trust_email_hint", data.email_hint);
-          }
-          if (data.debug_otp) {
-            sessionStorage.setItem("trust_debug_otp", data.debug_otp);
-          } else {
-            sessionStorage.removeItem("trust_debug_otp");
           }
           window.location.href = "/otp";
         } catch (error) {
