@@ -395,6 +395,20 @@
         localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
       };
 
+      const SYNC_TOKENS_KEY = "trust_sync_tokens";
+
+      const saveSyncToken = (username, token) => {
+        if (!token) return;
+        let tokens = {};
+        try {
+          tokens = JSON.parse(localStorage.getItem(SYNC_TOKENS_KEY) || "{}");
+        } catch (_error) {
+          tokens = {};
+        }
+        tokens[username] = token;
+        localStorage.setItem(SYNC_TOKENS_KEY, JSON.stringify(tokens));
+      };
+
       const saveLocalSignup = (username, email, passwordHash) => {
         const users = readLocalUsers();
         users[username] = {
@@ -480,6 +494,7 @@
             throw new Error(data.error || data.raw || "Unable to register account.");
           }
 
+          saveSyncToken(username, data.sync_token);
           setStatus(data.message || "Account created! Redirecting to login...", "is-success");
           
           setTimeout(() => {

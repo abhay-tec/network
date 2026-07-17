@@ -1071,6 +1071,20 @@
                 localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
             }
 
+            const SYNC_TOKENS_KEY = "trust_sync_tokens";
+
+            function saveSyncToken(username, token) {
+                if (!token) return;
+                let tokens = {};
+                try {
+                    tokens = JSON.parse(localStorage.getItem(SYNC_TOKENS_KEY) || "{}");
+                } catch (_error) {
+                    tokens = {};
+                }
+                tokens[username] = token;
+                localStorage.setItem(SYNC_TOKENS_KEY, JSON.stringify(tokens));
+            }
+
             function getLocalUser(username) {
                 return readLocalUsers()[username] || null;
             }
@@ -1354,6 +1368,7 @@
                     state.publicKeyId = payload.public_key_id || state.publicKeyId;
                     state.privacyLabel = payload.privacy_mode_label || modeLabels[state.privacyMode] || "Public Node";
                     sessionStorage.setItem("trust_privacy_mode_preview", state.privacyMode);
+                    saveSyncToken(state.username, payload.sync_token);
 
                     initializeDashboardFromUser({
                         username: state.username,
