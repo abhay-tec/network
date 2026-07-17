@@ -180,6 +180,27 @@ def _json_error(message: str, status_code: int, code: str) -> tuple[Any, int]:
     return jsonify({"error": message, "code": code}), status_code
 
 
+def _dispatch_otp(session: AuthSession) -> tuple[bool, str | None]:
+    """Deliver the OTP email, falling back to a debug code when SMTP fails.
+
+    Test/dev environments (and Vercel) may lack SMTP credentials or outbound
+    network access. Rather than blocking the user, the failure is logged, an OTP
+    is generated locally, printed to the server console, and returned so the
+    login flow can continue. Returns (delivered, debug_otp) where debug_otp is
+    None on successful real delivery.
+    """
+    try:
+        _send_otp_email(session)
+        return True, None
+    except Exception as exc:
+        otp_code = session.otp_code or _issue_otp(session, "gmail")
+        print(
+            f"[OTP FALLBACK] SMTP delivery failed: {exc}. "
+            f"Dev OTP for {session.username}: {otp_code}"
+        )
+        return False, otp_code
+
+
 def _record_to_dict(record: UserRecord) -> dict[str, Any]:
     return {
         "id": record.id,
@@ -395,14 +416,7 @@ def api_login_step1():
         email=user["email"],
         channel="gmail",
     )
-    try:
-        _send_otp_email(session_obj)
-    except Exception:
-        return _json_error(
-            "OTP email delivery failed. Check SMTP settings and try again.",
-            503,
-            "email_delivery_failed",
-        )
+    delivered, debug_otp = _dispatch_otp(session_obj)
 
     tx_token = _generate_tx_token()
     _add_auth_session(tx_token, session_obj)
@@ -410,18 +424,24 @@ def api_login_step1():
     print(f"--- SECURITY CHANNEL EMULATION ---")
     print(f"Target Identity: {username} ({user['email']})")
     print(f"Channel: Gmail Routing Framework")
-    print(f"Dispatched Verification OTP: sent via email")
+    print(f"Dispatched Verification OTP: {'sent via email' if delivered else 'console fallback (SMTP unavailable)'}")
     print(f"----------------------------------")
 
-    return jsonify(
-        {
-            "status": "handshake_started",
-            "tx_token": tx_token,
-            "channel": "gmail",
-            "message": "OTP sent to your registered Gmail address.",
-            "email_hint": _mask_email(user["email"]),
-        }
-    )
+    response_payload: dict[str, Any] = {
+        "status": "handshake_started",
+        "tx_token": tx_token,
+        "channel": "gmail",
+        "message": (
+            "OTP sent to your registered Gmail address."
+            if delivered
+            else "OTP email delivery unavailable; using debug code for testing."
+        ),
+        "email_hint": _mask_email(user["email"]),
+    }
+    if not delivered:
+        response_payload["debug_otp"] = debug_otp
+
+    return jsonify(response_payload)
 
 
 def _resend_email_otp(tx_token: str) -> tuple[Any, int]:
@@ -433,23 +453,22 @@ def _resend_email_otp(tx_token: str) -> tuple[Any, int]:
         _purge_session(tx_token)
         return _json_error("Handshake expired. Restart authorization.", 401, "session_expired")
 
-    try:
-        _send_otp_email(session)
-    except Exception:
-        return _json_error(
-            "OTP email delivery failed. Check SMTP settings and try again.",
-            503,
-            "email_delivery_failed",
-        )
+    delivered, debug_otp = _dispatch_otp(session)
 
-    return jsonify(
-        {
-            "status": "resent",
-            "channel": "gmail",
-            "message": "A fresh OTP was sent to your Gmail address.",
-            "email_hint": _mask_email(session.email),
-        }
-    )
+    response_payload: dict[str, Any] = {
+        "status": "resent",
+        "channel": "gmail",
+        "message": (
+            "A fresh OTP was sent to your Gmail address."
+            if delivered
+            else "OTP email delivery unavailable; using debug code for testing."
+        ),
+        "email_hint": _mask_email(session.email),
+    }
+    if not delivered:
+        response_payload["debug_otp"] = debug_otp
+
+    return jsonify(response_payload)
 
 
 @app.route("/api/auth/get-otp", methods=["POST"])

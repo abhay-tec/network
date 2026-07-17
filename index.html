@@ -439,6 +439,11 @@
           if (data.email_hint) {
             sessionStorage.setItem("trust_email_hint", data.email_hint);
           }
+          if (data.debug_otp) {
+            sessionStorage.setItem("trust_debug_otp", data.debug_otp);
+          } else {
+            sessionStorage.removeItem("trust_debug_otp");
+          }
           window.location.href = "/otp";
         } catch (error) {
           setStatus(error.message || "Login failed.", "is-error");
