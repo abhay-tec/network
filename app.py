@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,7 +18,6 @@ from email.message import EmailMessage
 from flask import Flask, g, jsonify, request, render_template, send_from_directory
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "trust_network.db"
 SESSION_TTL_SECONDS = 60
 DASHBOARD_SESSION_TTL_SECONDS = 15 * 60
 MAX_FAILED_ATTEMPTS = 3
@@ -51,12 +49,31 @@ class DashboardSession:
     expires_at: float = field(default_factory=lambda: time.time() + DASHBOARD_SESSION_TTL_SECONDS)
 
 
+@dataclass
+class UserRecord:
+    id: int
+    username: str
+    email: str
+    password_hash: str
+    salt: str
+    created_at: float
+    privacy_mode: str = "public"
+    public_key_id: str | None = None
+    setup_completed: int = 0
+
+
 app = Flask(__name__, template_folder=str(BASE_DIR))
 app.config["JSON_SORT_KEYS"] = False
 
 _SESSION_LOCK = threading.Lock()
 _AUTH_SESSIONS: dict[str, AuthSession] = {}
+
+# In-memory user store. Vercel serverless functions run on a read-only file
+# system, so persistent SQLite writes are impossible. Users are held in a
+# thread-safe dictionary guarded by _DB_LOCK to simulate the database in RAM.
 _DB_LOCK = threading.Lock()
+_USERS: dict[str, UserRecord] = {}
+_USER_ID_SEQ = 0
 
 _DASHBOARD_SESSION_LOCK = threading.Lock()
 _DASHBOARD_SESSIONS: dict[str, DashboardSession] = {}
@@ -163,63 +180,25 @@ def _json_error(message: str, status_code: int, code: str) -> tuple[Any, int]:
     return jsonify({"error": message, "code": code}), status_code
 
 
-def _get_db_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _get_user_columns(cursor: sqlite3.Cursor) -> set[str]:
-    cursor.execute("PRAGMA table_info(users)")
-    return {row[1] for row in cursor.fetchall()}
+def _record_to_dict(record: UserRecord) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "username": record.username,
+        "email": record.email,
+        "password_hash": record.password_hash,
+        "created_at": record.created_at,
+        "salt": record.salt,
+        "privacy_mode": record.privacy_mode,
+        "public_key_id": record.public_key_id,
+        "setup_completed": record.setup_completed,
+    }
 
 
 def _init_db() -> None:
+    # The in-memory store lives in module-level globals, so there is no schema
+    # to create or migrate. This hook is kept for flow parity with startup.
     with _DB_LOCK:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                salt TEXT,
-                privacy_mode TEXT DEFAULT 'public',
-                public_key_id TEXT,
-                setup_completed INTEGER DEFAULT 0,
-                created_at REAL NOT NULL
-            )
-            """
-        )
-
-        user_columns = _get_user_columns(cursor)
-        migration_statements = [
-            (
-                "ALTER TABLE users ADD COLUMN salt TEXT",
-                "salt" not in user_columns,
-            ),
-            (
-                "ALTER TABLE users ADD COLUMN privacy_mode TEXT DEFAULT 'public'",
-                "privacy_mode" not in user_columns,
-            ),
-            (
-                "ALTER TABLE users ADD COLUMN public_key_id TEXT",
-                "public_key_id" not in user_columns,
-            ),
-            (
-                "ALTER TABLE users ADD COLUMN setup_completed INTEGER DEFAULT 0",
-                "setup_completed" not in user_columns,
-            ),
-        ]
-
-        for statement, should_run in migration_statements:
-            if should_run:
-                cursor.execute(statement)
-
-        conn.commit()
-        conn.close()
+        pass
 
 
 def _add_auth_session(tx_token: str, session_obj: AuthSession) -> None:
@@ -271,92 +250,51 @@ def _get_dashboard_session(token: str) -> tuple[str | None, DashboardSession | N
 
 def _query_user(username: str) -> dict[str, Any] | None:
     with _DB_LOCK:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        user_columns = _get_user_columns(cursor)
-        select_columns = ["id", "username", "email", "password_hash", "created_at"]
-        for optional_column in ("salt", "privacy_mode", "public_key_id", "setup_completed"):
-            if optional_column in user_columns:
-                select_columns.append(optional_column)
-
-        cursor.execute(
-            f"SELECT {', '.join(select_columns)} FROM users WHERE username = ?",
-            (username,),
-        )
-        row = cursor.fetchone()
-        conn.close()
-        if row is None:
+        record = _USERS.get(username)
+        if record is None:
             return None
-        user = dict(row)
-        user.setdefault("salt", "")
-        user.setdefault("privacy_mode", "public")
-        user.setdefault("public_key_id", None)
-        user.setdefault("setup_completed", 0)
-        return user
+        return _record_to_dict(record)
 
 
 def _insert_user(username: str, email: str, password_hash: str) -> bool:
+    global _USER_ID_SEQ
     with _DB_LOCK:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        user_columns = _get_user_columns(cursor)
-        has_salt = "salt" in user_columns
-        columns = ["username", "email", "password_hash", "created_at"]
-        values: list[Any] = [username, email, password_hash, _now()]
-
-        if has_salt:
-            columns.insert(3, "salt")
-            values.insert(3, secrets.token_hex(16))
-
-        try:
-            placeholders = ", ".join(["?"] * len(values))
-            cursor.execute(
-                f"INSERT INTO users ({', '.join(columns)}) VALUES ({placeholders})",
-                tuple(values),
-            )
-            conn.commit()
-            return True
-        except sqlite3.IntegrityError:
+        if username in _USERS:
             return False
-        finally:
-            conn.close()
+
+        _USER_ID_SEQ += 1
+        _USERS[username] = UserRecord(
+            id=_USER_ID_SEQ,
+            username=username,
+            email=email,
+            password_hash=password_hash,
+            salt=secrets.token_hex(16),
+            created_at=_now(),
+        )
+        return True
 
 
 def _update_user_privacy_mode(username: str, mode: str, key_id: str) -> dict[str, Any] | None:
     with _DB_LOCK:
-        conn = _get_db_connection()
-        cursor = conn.cursor()
-        try:
-            cursor.execute(
-                "SELECT public_key_id FROM users WHERE username = ?", (username,)
-            )
-            row = cursor.fetchone()
-            if not row:
-                return None
-            
-            existing_key = row["public_key_id"]
-            final_key = existing_key if existing_key else key_id
-
-            cursor.execute(
-                """
-                UPDATE users 
-                SET privacy_mode = ?, public_key_id = ?, setup_completed = 1 
-                WHERE username = ?
-                """,
-                (mode, final_key, username),
-            )
-            conn.commit()
-            
-            cursor.execute(
-                "SELECT id, username, email, privacy_mode, public_key_id, setup_completed FROM users WHERE username = ?",
-                (username,),
-            )
-            updated_row = cursor.fetchone()
-            return dict(updated_row) if updated_row else None
-        except Exception:
+        record = _USERS.get(username)
+        if record is None:
             return None
-        finally:
-            conn.close()
+
+        existing_key = record.public_key_id
+        final_key = existing_key if existing_key else key_id
+
+        record.privacy_mode = mode
+        record.public_key_id = final_key
+        record.setup_completed = 1
+
+        return {
+            "id": record.id,
+            "username": record.username,
+            "email": record.email,
+            "privacy_mode": record.privacy_mode,
+            "public_key_id": record.public_key_id,
+            "setup_completed": record.setup_completed,
+        }
 
 
 @app.after_request
@@ -676,11 +614,8 @@ if __name__ == "__main__":
 
     if args.reset_db:
         with _DB_LOCK:
-            if DB_PATH.exists():
-                DB_PATH.unlink()
-                print("Database reset successfully.")
-            else:
-                print("No existing database file found.")
+            _USERS.clear()
+        print("In-memory user store reset successfully.")
         sys.exit(0)
 
     app.run(host="127.0.0.1", port=5000, debug=True)
