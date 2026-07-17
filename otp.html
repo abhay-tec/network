@@ -495,6 +495,15 @@
         statusBox.className = variant ? `status ${variant}` : "status";
       };
 
+      const showDebugOtp = (code) => {
+        if (!code) return;
+        otpInput.value = code;
+        deliveryHint.textContent = `SMTP unavailable — debug OTP: ${code}`;
+        setStatus(`Debug OTP (SMTP unavailable): ${code}`, "is-success");
+      };
+
+      showDebugOtp(sessionStorage.getItem("trust_debug_otp"));
+
       const digitsOnly = (value) => value.replace(/\D/g, "").slice(0, 6);
 
       const requestJson = async (url, payload) => {
@@ -561,6 +570,7 @@
             tx_token: txToken,
             otp_code: otpCode,
           });
+          sessionStorage.removeItem("trust_debug_otp");
           finalizeDashboard(data.dashboard_payload || {});
           otpInput.disabled = true;
           resendBtn.disabled = true;
@@ -581,10 +591,16 @@
         try {
           const data = await requestJson("/api/auth/resend-otp", { tx_token: txToken });
           channelChip.textContent = "Channel: Gmail";
-          deliveryHint.textContent = data.email_hint
-            ? `OTP sent to ${data.email_hint}.`
-            : "A fresh OTP was sent to your Gmail inbox.";
-          setStatus(data.message || "Fresh OTP sent to Gmail.", "is-success");
+          if (data.debug_otp) {
+            sessionStorage.setItem("trust_debug_otp", data.debug_otp);
+            showDebugOtp(data.debug_otp);
+          } else {
+            sessionStorage.removeItem("trust_debug_otp");
+            deliveryHint.textContent = data.email_hint
+              ? `OTP sent to ${data.email_hint}.`
+              : "A fresh OTP was sent to your Gmail inbox.";
+            setStatus(data.message || "Fresh OTP sent to Gmail.", "is-success");
+          }
           otpInput.focus({ preventScroll: true });
         } catch (error) {
           setStatus(error.message || "Unable to resend OTP.", "is-error");
