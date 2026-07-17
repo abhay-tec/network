@@ -193,7 +193,9 @@ def _dispatch_otp(session: AuthSession) -> tuple[bool, str | None]:
         _send_otp_email(session)
         return True, None
     except Exception as exc:
-        otp_code = session.otp_code or _issue_otp(session, "gmail")
+        # Always issue a fresh code so resend renews both the OTP and its TTL,
+        # matching the successful-delivery path (which issues before sending).
+        otp_code = _issue_otp(session, "gmail")
         print(
             f"[OTP FALLBACK] SMTP delivery failed: {exc}. "
             f"Dev OTP for {session.username}: {otp_code}"
