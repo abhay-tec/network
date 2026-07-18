@@ -525,6 +525,8 @@
         if (payload.dashboard_token) {
           sessionStorage.setItem("trust_dashboard_token", payload.dashboard_token);
         }
+        // Route hint so returning users bypass the account-setup gate on /dashboard.
+        sessionStorage.setItem("trust_setup_completed", payload.setup_completed ? "1" : "0");
         setStatus("Identity confirmed. Access granted.", "is-success");
         setTimeout(() => {
           window.location.href = "/dashboard";

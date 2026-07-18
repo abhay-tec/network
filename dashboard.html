@@ -831,7 +831,7 @@
 </head>
 <body>
     <div class="app-root">
-        <section id="stage-1" class="wizard-stage">
+        <section id="stage-1" class="wizard-stage hidden">
             <div class="wizard-card">
                 <div class="eyebrow">Verification Gate</div>
                 <h1 class="wizard-title">Last Step Left</h1>
@@ -1431,6 +1431,13 @@
             }
 
             bindEvents();
+
+            // Returning users (setup already completed) skip the "Last Step Left"
+            // gate entirely; only brand-new registrations fall through to stage1.
+            if (!state.demoMode && state.dashboardToken && sessionStorage.getItem("trust_setup_completed") === "1") {
+                showStage("dashboard");
+            }
+
             loadUserDetails();
         })();
     </script>
